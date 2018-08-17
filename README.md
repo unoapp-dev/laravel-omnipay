@@ -21,21 +21,21 @@ Version `2.3` and onwards supports Laravel 5.4
 
 ### Composer Configuration
 
+**Important Note: Compatibility with Symfony 3 Event Dispatcher**
+
+If you are using Symfony 3 (or Symfony 3 components), please note that Omnipay 2.x still relies on Guzzle3, which in turn depends on symfony/event-dispatcher 2.x. This conflicts with Symfony 3 (standard install), so cannot be installed. Development for Omnipay 3.x is still in progress at the moment.
+
+If you are just using the Symfony 3 components (eg. stand-alone or Silex/Laravel etc), you could try to force the install of symfony/event-dispatcher:^2.8, which is compatible with both Symfony 3 components and Guzzle 3.
+
+```
+composer require symfony/event-dispatcher:^2.8
+```
+
 Include the laravel-omnipay package as a dependency in your `composer.json`:
 
-    "ignited/laravel-omnipay": "2.*"
+    "unoapp-dev/laravel-omnipay": "^2.*"
     
 **Note:** You don't need to include the `omnipay/common` in your composer.json - it is a requirement of the `laravel-omnipay` package.
-
-Omnipay recently went refactoring that made it so that each package is now a seperate repository. The `omnipay/common` package includes the core framework. You will then need to include each gateway as you require. For example:
-
-    "omnipay/eway": "*"
-    
-Alternatively you can include every gateway by requring:
-
-    "omnipay/omnipay": "*"
-
-**Note:** this requires a large amount of composer work as it needs to fetch each seperate repository. This is not recommended.
 
 ### Installation
 
@@ -83,25 +83,20 @@ $app->configure('laravel-omnipay');
 
 Once you have published the configuration files, you can add your gateway options to the config file in `config/laravel-omnipay.php`.
 
-#### PayPal Express Example
-Here is an example of how to configure password, username and, signature with paypal express checkout driver
+#### Moneris Example
+Here is an example of how to configure merchant id & merchant key with moneris driver
 
 ```php
 ...
 'gateways' => [
-    'paypal' => [
-        'driver'  => 'PayPal_Express',
+    'moneris' => [
+        'driver' => 'Moneris',
         'options' => [
-            'username'  => env( 'OMNIPAY_PAYPAL_EXPRESS_USERNAME', '' ),
-            'password'  => env( 'OMNIPAY_PAYPAL_EXPRESS_PASSWORD', '' ),
-            'signature' => env( 'OMNIPAY_PAYPAL_EXPRESS_SIGNATURE', '' ),
-            'solutionType' => env( 'OMNIPAY_PAYPAL_EXPRESS_SOLUTION_TYPE', '' ),
-            'landingPage'    => env( 'OMNIPAY_PAYPAL_EXPRESS_LANDING_PAGE', '' ),
-            'headerImageUrl' => env( 'OMNIPAY_PAYPAL_EXPRESS_HEADER_IMAGE_URL', '' ),
-            'brandName' =>  'Your app name',
-            'testMode' => env( 'OMNIPAY_PAYPAL_TEST_MODE', true )
+            'merchantId' => env('MONERIS_MERCHANT_ID', ''),
+            'merchantKey' => env('MONERIS_MERCHANT_KEY', ''),
+            'testMode' => env('MONERIS_TEST_MODE', '')
         ]
-    ],
+    ]
 ]
 ...
 ```
@@ -111,22 +106,52 @@ Here is an example of how to configure password, username and, signature with pa
 
 ```php
 $cardInput = [
-	'number'      => '4444333322221111',
-	'firstName'   => 'MR. WALTER WHITE',
-	'expiryMonth' => '03',
-	'expiryYear'  => '16',
-	'cvv'         => '333',
+    'firstName'   => 'John',
+    'lastName'    => 'Doe',
+    'number'      => '4242424242424242',
+    'expiryMonth' => '03',
+    'expiryYear'  => '2025',
+    'cvv'         => '123',
+    'billingAddress1' => '795 Folsom Ave, Suite 600',
+    'billingCity' => 'San Francisco',
+    'billingPostcode' => '94107',
+    'billingState' => 'California',
+    'billingCountry' => 'United States',
+    'billingPhone' => '(555) 539-1037',
+    'email' => 'john.doe@example.com'
 ];
 
-$card = Omnipay::creditCard($cardInput);
-$response = Omnipay::purchase([
-	'amount'    => '100.00',
-	'returnUrl' => 'http://bobjones.com/payment/return',
-	'cancelUrl' => 'http://bobjones.com/payment/cancel',
-	'card'      => $cardInput
-])->send();
 
-dd($response->getMessage());
+# 1. Generate payment profile :
+$createcardResponse = Omnipay::createCard(['card' => $cardInput])->send();
+
+
+# 2. Delete payment profile :
+$cardParams = [
+    'cardReference' => $createcardResponse->getCardReference()
+];
+
+$deletecardResponse = Omnipay::deleteCard($cardParams)->send();
+
+
+# 3. Purchase (using payment profile) :
+$purchaseParams = [
+    "amount" => 100,
+    "order_number" => 11111,
+    "payment_method" => 'payment_profile',
+    "cardReference" => $createcardResponse->getCardReference() 
+];
+
+$purchaseResponse = Omnipay::purchase($purchaseParams)->send();
+
+
+# 4. Refund :
+$refundParams = [
+   'amount' => 100,
+   'transactionReference' => $purchaseResponse->getData()
+];
+
+$refundResponse = Omnipay::refund($refundParams)->send();
 ```
     
 This will use the gateway specified in the config as `default`.
@@ -134,18 +159,11 @@ This will use the gateway specified in the config as `default`.
 However, you can also specify a gateway to use.
 
 ```php
-Omnipay::setGateway('eway');
-
-$response = Omnipay::purchase([
-	'amount' => '100.00',
-	'card'   => $cardInput
-])->send();
-
-dd($response->getMessage());
+Omnipay::setGateway('moneris');
 ```
     
 In addition you can take an instance of the gateway.
 
 ```php
-$gateway = Omnipay::gateway('eway');
+$gateway = Omnipay::getGateway('moneris');
 ```
